@@ -78,21 +78,85 @@ impl Config {
         }
     }
 
+    /// Validates the configuration and returns an error if invalid
+    pub fn validate(&self) -> Result<(), String> {
+        if self.servers.is_empty() {
+            return Err("No servers configured".to_string());
+        }
+
+        // Check for duplicate port bindings on same host
+        let mut seen_bindings: Vec<(String, u16)> = Vec::new();
+        for server in &self.servers {
+            for port in &server.ports {
+                let binding = (server.host.clone(), *port);
+                // Allow same port if different server_name (virtual hosting)
+                let duplicate = seen_bindings.iter().any(|(h, p)| {
+                    h == &server.host && p == port
+                });
+                
+                // Check if there's already a server with same host:port but different server_name
+                let virtual_host_exists = self.servers.iter().any(|s| {
+                    s.host == server.host && 
+                    s.ports.contains(port) && 
+                    s.server_name != server.server_name
+                });
+                
+                if duplicate && !virtual_host_exists {
+                    return Err(format!(
+                        "Duplicate port binding: {}:{} (use different server_name for virtual hosting)",
+                        server.host, port
+                    ));
+                }
+                seen_bindings.push(binding);
+            }
+        }
+
+        // Validate each server
+        for server in &self.servers {
+            if server.ports.is_empty() {
+                return Err(format!("Server '{}' has no ports configured", server.server_name));
+            }
+            if server.root.is_empty() {
+                return Err(format!("Server '{}' has no root directory", server.server_name));
+            }
+        }
+
+        Ok(())
+    }
+
     /// Finds the server config for a given host:port and server_name
     pub fn find_server(&self, host: &str, port: u16, server_name: Option<&str>) -> Option<&ServerConfig> {
         // First try to find exact match with server_name
         if let Some(name) = server_name {
             if let Some(server) = self.servers.iter().find(|s| {
-                s.host == host && s.ports.contains(&port) && s.server_name == name
+                s.ports.contains(&port) && s.server_name == name
             }) {
                 return Some(server);
             }
         }
 
-        // Fall back to first server matching host:port (default server)
+        // Fall back to first server matching port (default server)
         self.servers
             .iter()
-            .find(|s| s.host == host && s.ports.contains(&port))
+            .find(|s| s.ports.contains(&port))
+    }
+
+    /// Finds server by Host header (for virtual hosting)
+    pub fn find_server_by_host(&self, host_header: &str, port: u16) -> Option<&ServerConfig> {
+        // Extract hostname without port
+        let hostname = host_header.split(':').next().unwrap_or(host_header);
+        
+        // Try exact server_name match first
+        if let Some(server) = self.servers.iter().find(|s| {
+            s.ports.contains(&port) && s.server_name == hostname
+        }) {
+            return Some(server);
+        }
+
+        // Fall back to first server on this port (default)
+        self.servers
+            .iter()
+            .find(|s| s.ports.contains(&port))
     }
 
     /// Gets all unique host:port combinations

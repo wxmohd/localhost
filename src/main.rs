@@ -33,6 +33,12 @@ fn main() {
         }
     };
 
+    // Validate configuration
+    if let Err(e) = config.validate() {
+        eprintln!("Configuration error: {}", e);
+        process::exit(1);
+    }
+
     // Print server info
     println!("\nServer configuration:");
     for server in &config.servers {

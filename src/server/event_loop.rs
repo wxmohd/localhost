@@ -186,9 +186,9 @@ impl EventLoop {
             if let Some(conn) = self.connections.get_mut(&fd) {
                 let response = match conn.parse_request() {
                     Ok(request) => {
-                        // Find the right server config
-                        let server_config = self.config.servers.iter()
-                            .find(|s| s.ports.contains(&conn.server_port))
+                        // Find the right server config using Host header for virtual hosting
+                        let host_header = request.host().unwrap_or("localhost");
+                        let server_config = self.config.find_server_by_host(host_header, conn.server_port)
                             .or_else(|| self.config.servers.first());
 
                         if let Some(server) = server_config {
