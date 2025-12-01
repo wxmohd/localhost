@@ -25,6 +25,7 @@ impl Handler {
             Some(r) => r,
             None => return self.error_response(server, 404),
         };
+        
 
         // Check if method is allowed
         if !route.is_method_allowed(&request.method) {
@@ -36,11 +37,12 @@ impl Handler {
             return Redirect::to(location, *permanent);
         }
 
-        // Resolve file path
-        let file_path = match route.resolve_path(&request.path) {
+        // Resolve file path (use server root if route has no root)
+        let file_path = match route.resolve_path_with_root(&request.path, &server.root) {
             Some(p) => p,
             None => return self.error_response(server, 404),
         };
+        
 
         let path = Path::new(&file_path);
 
@@ -260,10 +262,14 @@ impl Handler {
 
     /// Generates an error response
     fn error_response(&self, server: &ServerConfig, status_code: u16) -> Response {
+        use crate::http::StatusCode;
+        
         // Try custom error page
         if let Some(error_page) = server.get_error_page(status_code) {
             let error_path = format!("{}/{}", server.root, error_page.trim_start_matches('/'));
-            if let Ok(response) = StaticFiles::serve(&error_path) {
+            if let Ok(mut response) = StaticFiles::serve(&error_path) {
+                // Set correct status code for error page
+                response.status = StatusCode::from_code(status_code).unwrap_or(StatusCode::InternalServerError);
                 return response;
             }
         }

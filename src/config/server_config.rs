@@ -161,12 +161,15 @@ impl Config {
 
     /// Gets all unique host:port combinations
     pub fn get_listen_addresses(&self) -> Vec<(String, u16)> {
-        let mut addresses = Vec::new();
+        use std::collections::HashSet;
+        let mut seen: HashSet<(String, u16)> = HashSet::new();
+        let mut addresses: Vec<(String, u16)> = Vec::new();
+        
         for server in &self.servers {
-            for port in &server.ports {
-                let addr = (server.host.clone(), *port);
-                if !addresses.contains(&addr) {
-                    addresses.push(addr);
+            for &port in &server.ports {
+                let key = (server.host.clone(), port);
+                if seen.insert(key.clone()) {
+                    addresses.push(key);
                 }
             }
         }

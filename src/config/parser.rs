@@ -59,6 +59,7 @@ impl ConfigParser {
     fn parse_server_block(chars: &mut std::iter::Peekable<std::str::Chars>) -> Result<ServerConfig> {
         let mut server = ServerConfig::new();
         server.routes.clear(); // Clear default route
+        server.ports.clear();  // Clear default port
 
         loop {
             Self::skip_whitespace(chars);
@@ -112,11 +113,8 @@ impl ConfigParser {
                             if chars.next() != Some('{') {
                                 return Err(ServerError::Config("Expected '{' after location path".to_string()));
                             }
-                            let mut route = Self::parse_location_block(chars, &path)?;
-                            // Inherit root from server if not set
-                            if route.root.is_none() {
-                                route.root = Some(server.root.clone());
-                            }
+                            let route = Self::parse_location_block(chars, &path)?;
+                            // Don't inherit root - let handler use server root directly
                             server.routes.push(route);
                         }
                         "" => continue,

@@ -53,26 +53,46 @@ impl Route {
     /// Returns the file path for a request, resolving against root
     pub fn resolve_path(&self, request_path: &str) -> Option<String> {
         let root = self.root.as_ref()?;
-        
-        // Remove route prefix from request path
         let relative = if self.path == "/" {
             request_path
         } else {
             request_path.strip_prefix(&self.path).unwrap_or(request_path)
         };
-
-        // Clean up the path
         let relative = relative.trim_start_matches('/');
         
         if relative.is_empty() {
-            // Return index file if path is directory
-            if let Some(ref index) = self.index {
-                Some(format!("{}/{}", root, index))
-            } else {
-                Some(root.clone())
-            }
+            Some(root.clone())
         } else {
             Some(format!("{}/{}", root, relative))
+        }
+    }
+
+    /// Returns the file path using provided root as fallback
+    pub fn resolve_path_with_root(&self, request_path: &str, server_root: &str) -> Option<String> {
+        // If route has custom root, use it and strip route prefix
+        // Otherwise use server root and keep full request path
+        if let Some(ref custom_root) = self.root {
+            // Route has its own root - strip route prefix
+            let relative = if self.path == "/" {
+                request_path
+            } else {
+                request_path.strip_prefix(&self.path).unwrap_or(request_path)
+            };
+            let relative = relative.trim_start_matches('/');
+            
+            if relative.is_empty() {
+                Some(custom_root.clone())
+            } else {
+                Some(format!("{}/{}", custom_root, relative))
+            }
+        } else {
+            // Using server root - map request path directly to server root
+            let clean_path = request_path.trim_start_matches('/');
+            if clean_path.is_empty() {
+                Some(server_root.to_string())
+            } else {
+                Some(format!("{}/{}", server_root, clean_path))
+            }
         }
     }
 

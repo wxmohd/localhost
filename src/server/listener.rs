@@ -18,8 +18,6 @@ impl Listener {
         let listener = TcpListener::bind(addr)?;
         listener.set_nonblocking(true)?;
 
-        println!("Listening on {}:{}", host, port);
-
         Ok(Listener {
             inner: listener,
             addr,

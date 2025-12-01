@@ -44,8 +44,10 @@ impl EventLoop {
     pub fn run(&mut self) -> Result<()> {
         self.running = true;
 
-        // Create listeners for all configured addresses
-        for (host, port) in self.config.get_listen_addresses() {
+        // Create listeners for all configured addresses (deduplicated)
+        let addresses = self.config.get_listen_addresses();
+        for (host, port) in addresses {
+            println!("Listening on {}:{}", host, port);
             let listener = Listener::bind(&host, port)?;
             let fd = listener.fd();
             self.poller.register(fd, EventType::Read)?;
