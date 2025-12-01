@@ -65,12 +65,17 @@ impl EventLoop {
                     if event.readable {
                         self.accept_connection(event.fd)?;
                     }
-                } else if let Some(conn) = self.connections.get_mut(&event.fd) {
-                    // Existing connection has activity
-                    if event.readable && conn.state == ConnectionState::Reading {
+                } else if self.connections.contains_key(&event.fd) {
+                    // Get connection state first
+                    let state = self.connections.get(&event.fd)
+                        .map(|c| c.state)
+                        .unwrap_or(ConnectionState::Closed);
+                    
+                    // Handle based on state
+                    if event.readable && state == ConnectionState::Reading {
                         self.handle_read(event.fd)?;
                     }
-                    if event.writable && conn.state == ConnectionState::Writing {
+                    if event.writable && state == ConnectionState::Writing {
                         self.handle_write(event.fd)?;
                     }
                 }

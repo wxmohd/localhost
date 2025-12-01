@@ -1,9 +1,13 @@
 use crate::error::{Result, ServerError};
 use std::collections::HashMap;
-use std::io;
 use std::net::TcpStream;
-use std::os::windows::io::AsRawSocket;
 use std::time::Duration;
+
+#[cfg(windows)]
+use std::os::windows::io::AsRawSocket;
+
+#[cfg(not(windows))]
+use std::os::unix::io::AsRawFd;
 
 /// Event types for polling
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,7 +25,8 @@ pub struct Event {
     pub writable: bool,
 }
 
-/// Cross-platform event poller (uses select on Windows)
+/// Cross-platform event poller
+/// Uses a simple polling approach compatible with Windows and Unix
 pub struct Poller {
     /// Registered file descriptors and their event types
     registered: HashMap<u64, EventType>,
@@ -59,100 +64,43 @@ impl Poller {
 
     /// Waits for events with a timeout
     /// Returns a list of events that occurred
-    pub fn wait(&self, timeout: Option<Duration>) -> Result<Vec<Event>> {
+    pub fn wait(&mut self, timeout: Option<Duration>) -> Result<Vec<Event>> {
         if self.registered.is_empty() {
-            // Sleep briefly if nothing to poll
             if let Some(t) = timeout {
                 std::thread::sleep(t.min(Duration::from_millis(100)));
             }
             return Ok(Vec::new());
         }
 
-        let mut events = Vec::new();
-
-        // Use select-based polling on Windows
-        unsafe {
-            let mut read_fds: libc::fd_set = std::mem::zeroed();
-            let mut write_fds: libc::fd_set = std::mem::zeroed();
-
-            // Initialize fd_sets
-            libc::FD_ZERO(&mut read_fds);
-            libc::FD_ZERO(&mut write_fds);
-
-            let mut max_fd: i32 = 0;
-
-            for (&fd, &event_type) in &self.registered {
-                let socket_fd = fd as i32;
-                max_fd = max_fd.max(socket_fd);
-
-                match event_type {
-                    EventType::Read => {
-                        libc::FD_SET(socket_fd as libc::SOCKET, &mut read_fds);
-                    }
-                    EventType::Write => {
-                        libc::FD_SET(socket_fd as libc::SOCKET, &mut write_fds);
-                    }
-                    EventType::ReadWrite => {
-                        libc::FD_SET(socket_fd as libc::SOCKET, &mut read_fds);
-                        libc::FD_SET(socket_fd as libc::SOCKET, &mut write_fds);
-                    }
-                }
-            }
-
-            // Set timeout
-            let mut tv = libc::timeval {
-                tv_sec: 0,
-                tv_usec: 0,
-            };
-
-            let timeout_ptr = if let Some(t) = timeout {
-                tv.tv_sec = t.as_secs() as i32;
-                tv.tv_usec = t.subsec_micros() as i32;
-                &mut tv as *mut libc::timeval
-            } else {
-                std::ptr::null_mut()
-            };
-
-            // Call select
-            let result = libc::select(
-                max_fd + 1,
-                &mut read_fds,
-                &mut write_fds,
-                std::ptr::null_mut(),
-                timeout_ptr,
-            );
-
-            if result < 0 {
-                let err = io::Error::last_os_error();
-                // Ignore interrupted system calls
-                if err.kind() != io::ErrorKind::Interrupted {
-                    return Err(ServerError::Io(err));
-                }
-                return Ok(Vec::new());
-            }
-
-            // Check which sockets have events
-            for &fd in self.registered.keys() {
-                let socket_fd = fd as libc::SOCKET;
-                let readable = libc::FD_ISSET(socket_fd, &read_fds);
-                let writable = libc::FD_ISSET(socket_fd, &write_fds);
-
-                if readable || writable {
-                    events.push(Event {
-                        fd,
-                        readable,
-                        writable,
-                    });
-                }
-            }
+        // Simple polling: sleep briefly and return all registered as ready
+        // This is a simplified approach - in production you'd use platform-specific APIs
+        if let Some(t) = timeout {
+            std::thread::sleep(t.min(Duration::from_millis(10)));
         }
+
+        // Return all registered sockets as potentially ready
+        // The actual I/O operations will handle EWOULDBLOCK
+        let events: Vec<Event> = self.registered
+            .iter()
+            .map(|(&fd, &event_type)| Event {
+                fd,
+                readable: matches!(event_type, EventType::Read | EventType::ReadWrite),
+                writable: matches!(event_type, EventType::Write | EventType::ReadWrite),
+            })
+            .collect();
 
         Ok(events)
     }
 
     /// Helper to get raw socket from TcpStream
+    #[cfg(windows)]
     pub fn get_fd(stream: &TcpStream) -> u64 {
         stream.as_raw_socket() as u64
+    }
+
+    #[cfg(not(windows))]
+    pub fn get_fd(stream: &TcpStream) -> u64 {
+        stream.as_raw_fd() as u64
     }
 }
 
