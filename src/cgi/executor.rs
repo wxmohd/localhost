@@ -17,16 +17,20 @@ impl CgiExecutor {
         if !path.exists() {
             return Err(ServerError::NotFound);
         }
+        
+        // Get absolute path for the script
+        let abs_path = path.canonicalize()
+            .map_err(|e| ServerError::Cgi(format!("Failed to resolve script path: {}", e)))?;
 
         // Build environment variables
-        let env_vars = Self::build_env(request, script_path);
+        let env_vars = Self::build_env(request, abs_path.to_str().unwrap_or(script_path));
 
         // Get the script's directory for working directory
-        let working_dir = path.parent().unwrap_or(Path::new("."));
+        let working_dir = abs_path.parent().unwrap_or(Path::new("."));
 
         // Execute the CGI script
         let mut child = Command::new(interpreter)
-            .arg(script_path)
+            .arg(&abs_path)
             .envs(env_vars)
             .current_dir(working_dir)
             .stdin(Stdio::piped())

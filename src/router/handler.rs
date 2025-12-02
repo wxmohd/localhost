@@ -4,22 +4,37 @@ use super::static_files::StaticFiles;
 use crate::cgi::CgiExecutor;
 use crate::config::{Config, ServerConfig};
 use crate::http::{Method, Request, Response};
+use crate::session::SessionStore;
 use std::fs;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 /// Main request handler
 pub struct Handler {
     config: Config,
+    sessions: Arc<Mutex<SessionStore>>,
 }
 
 impl Handler {
     /// Creates a new handler with the given configuration
     pub fn new(config: Config) -> Self {
-        Handler { config }
+        Handler { 
+            config,
+            sessions: Arc::new(Mutex::new(SessionStore::new())),
+        }
     }
 
     /// Handles an incoming request
     pub fn handle(&self, request: &Request, server: &ServerConfig) -> Response {
+        // Get or create session
+        let session_cookie = request.cookie("session_id");
+        let (session_id, is_new_session) = {
+            let mut sessions = self.sessions.lock().unwrap();
+            match session_cookie {
+                Some(ref id) if sessions.get(id).is_some() => (id.clone(), false),
+                _ => (sessions.create(), true),
+            }
+        };
         // Find matching route
         let route = match server.find_route(&request.path) {
             Some(r) => r,
@@ -52,7 +67,7 @@ impl Handler {
         }
 
         // Handle based on method
-        match request.method {
+        let mut response = match request.method {
             Method::Get | Method::Head => {
                 self.handle_get(request, &file_path, route.autoindex, route.index.as_deref(), server)
             }
@@ -63,7 +78,15 @@ impl Handler {
                 self.handle_delete(&file_path, server)
             }
             _ => self.error_response(server, 405),
+        };
+        
+        // Set session cookie if new session
+        if is_new_session {
+            response.headers.add("Set-Cookie", 
+                &format!("session_id={}; Path=/; HttpOnly; SameSite=Strict", session_id));
         }
+        
+        response
     }
 
     /// Handles GET requests
